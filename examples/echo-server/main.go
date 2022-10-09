@@ -22,10 +22,14 @@ func run(ctx context.Context) error {
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT)
 	defer cancel()
 
-	mainRoutine := routine.Main(ctx)
 	logger := log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lmsgprefix)
+
+	ctx = routine.NewPanicHookContext(ctx, func(v interface{}) {
+		logger.Println(":(")
+	})
+
 	listenAddress := os.Getenv("LISTEN_ADDRESS")
 
-	server := StartNewServer(mainRoutine, logger, listenAddress)
-	return server.Wait()
+	server := NewServer(logger, listenAddress)
+	return server.Run(ctx)
 }
