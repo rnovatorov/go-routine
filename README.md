@@ -13,3 +13,5 @@ Alternatives:
 - [go-tomb](https://github.com/go-tomb/tomb)
 - [go-sup](https://github.com/warpfork/go-sup)
 - [go-together](https://github.com/tideland/go-together)
+- [nursery](https://github.com/arunsworld/nursery)
+- [oversight](https://github.com/cirello-io/oversight)
