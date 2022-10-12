@@ -8,42 +8,23 @@ import (
 	"io"
 	"log"
 	"net"
-	"sync"
-
-	"github.com/rnovatorov/go-routine"
 )
 
 type Session struct {
-	*routine.Routine
-	logger   *log.Logger
-	conn     net.Conn
-	stopOnce sync.Once
+	logger *log.Logger
+	conn   net.Conn
 }
 
-func StartNewSession(parent routine.Parent, logger *log.Logger, conn net.Conn) *Session {
-	s := &Session{
-		logger: logger,
+func NewSession(name string, logger *log.Logger, conn net.Conn) *Session {
+	return &Session{
+		logger: log.New(logger.Writer(), name+" ", logger.Flags()),
 		conn:   conn,
 	}
-
-	s.Routine = routine.Go(parent, s.run)
-
-	return s
 }
 
-func (s *Session) Stop() error {
-	s.stopOnce.Do(func() {
-		if err := s.conn.Close(); err != nil {
-			s.logger.Printf("failed to close session: %v", err)
-		}
-	})
-
-	return s.Routine.Stop()
-}
-
-func (s *Session) run(ctx context.Context) error {
-	s.logger.Print("session started")
-	defer s.logger.Print("session stopped")
+func (s *Session) Run(ctx context.Context) error {
+	s.logger.Print("started")
+	defer s.logger.Print("stopped")
 
 	r := bufio.NewReader(s.conn)
 	w := bufio.NewWriter(s.conn)
@@ -57,7 +38,13 @@ func (s *Session) run(ctx context.Context) error {
 			return fmt.Errorf("read: %w", err)
 		}
 
-		if v := line[0]; v == 'X' {
+		switch m := string(line); m {
+		case "exit\n":
+			return nil
+		case "panic\n":
+			var s []string
+			s[42] = "oops"
+		case "error\n":
 			return errors.New("oops")
 		}
 
