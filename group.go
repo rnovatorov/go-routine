@@ -83,3 +83,9 @@ func panicHookFromContext(ctx context.Context) (PanicHook, bool) {
 	hook, ok := ctx.Value(panicHookContextKey).(PanicHook)
 	return hook, ok
 }
+
+func WaitGroup(ctx context.Context, spawn func(g *Group)) error {
+	g := NewGroup(ctx)
+	spawn(g)
+	return g.Wait()
+}

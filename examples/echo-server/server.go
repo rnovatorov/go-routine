@@ -25,16 +25,14 @@ func NewServer(logger *log.Logger, listenAddress string) *Server {
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	rg := routine.NewGroup(ctx)
-
-	listenerChan := s.listen(rg)
-	connChan := s.acceptConns(rg, listenerChan)
-	s.handleConns(rg, connChan)
-
 	s.logger.Print("started")
 	defer s.logger.Print("stopped")
 
-	return rg.Wait()
+	return routine.WaitGroup(ctx, func(rg *routine.Group) {
+		listenerChan := s.listen(rg)
+		connChan := s.acceptConns(rg, listenerChan)
+		s.handleConns(rg, connChan)
+	})
 }
 
 func (s *Server) listen(rg *routine.Group) <-chan net.Listener {
