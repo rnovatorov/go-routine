@@ -32,9 +32,6 @@ func (g *Group) Wait() error {
 
 	g.wg.Wait()
 
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	return g.err
 }
 
