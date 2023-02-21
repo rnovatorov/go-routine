@@ -14,14 +14,14 @@ func WaitGroup(ctx context.Context, spawn func(g *Group)) error {
 
 type Group struct {
 	ctx    context.Context
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	wg     sync.WaitGroup
 	mu     sync.Mutex
 	err    error
 }
 
 func NewGroup(ctx context.Context) *Group {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 
 	return &Group{
 		ctx:    ctx,
@@ -30,7 +30,7 @@ func NewGroup(ctx context.Context) *Group {
 }
 
 func (g *Group) Wait() error {
-	defer g.cancel()
+	defer g.cancel(nil)
 
 	g.wg.Wait()
 
@@ -50,20 +50,21 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 		}()
 
 		if err := run(g.ctx); err != nil {
-			g.cancel()
-			g.appendError(name, err)
+			err = fmt.Errorf("%s: %w", name, err)
+			g.cancel(err)
+			g.appendError(err)
 		}
 	}()
 }
 
-func (g *Group) appendError(name string, err error) {
+func (g *Group) appendError(err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	if g.err == nil {
-		g.err = fmt.Errorf("%s: %w", name, err)
+		g.err = err
 	} else {
-		g.err = fmt.Errorf("%w; %s: %w", g.err, name, err)
+		g.err = fmt.Errorf("%w; %w", g.err, err)
 	}
 }
 
