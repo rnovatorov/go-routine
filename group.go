@@ -45,17 +45,20 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 
 		if err := run(g.ctx); err != nil {
 			g.cancel()
-
-			g.mu.Lock()
-			defer g.mu.Unlock()
-
-			if g.err == nil {
-				g.err = fmt.Errorf("%s: %w", name, err)
-			} else {
-				g.err = fmt.Errorf("%w; %s: %w", g.err, name, err)
-			}
+			g.appendError(name, err)
 		}
 	}()
+}
+
+func (g *Group) appendError(name string, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.err == nil {
+		g.err = fmt.Errorf("%s: %w", name, err)
+	} else {
+		g.err = fmt.Errorf("%w; %s: %w", g.err, name, err)
+	}
 }
 
 func (g *Group) panicHook(v interface{}) {
