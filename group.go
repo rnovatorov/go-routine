@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-
-	"go.uber.org/multierr"
 )
 
 type Group struct {
@@ -54,8 +52,11 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 			g.mu.Lock()
 			defer g.mu.Unlock()
 
-			g.err = multierr.Append(g.err,
-				fmt.Errorf("%s: %w", name, err))
+			if g.err == nil {
+				g.err = fmt.Errorf("%s: %w", name, err)
+			} else {
+				g.err = fmt.Errorf("%w; %s: %w", g.err, name, err)
+			}
 		}
 	}()
 }
