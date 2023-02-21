@@ -6,6 +6,12 @@ import (
 	"sync"
 )
 
+func WaitGroup(ctx context.Context, spawn func(g *Group)) error {
+	g := NewGroup(ctx)
+	spawn(g)
+	return g.Wait()
+}
+
 type Group struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -67,18 +73,12 @@ func (g *Group) panicHook(v interface{}) {
 	}
 }
 
-type contextKey struct{}
-
-var panicHookContextKey contextKey
-
 type PanicHook func(interface{})
 
 func NewPanicHookContext(ctx context.Context, hook PanicHook) context.Context {
 	return context.WithValue(ctx, panicHookContextKey, hook)
 }
 
-func WaitGroup(ctx context.Context, spawn func(g *Group)) error {
-	g := NewGroup(ctx)
-	spawn(g)
-	return g.Wait()
-}
+type contextKey struct{}
+
+var panicHookContextKey contextKey
