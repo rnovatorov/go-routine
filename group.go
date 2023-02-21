@@ -7,23 +7,19 @@ import (
 )
 
 type Group struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	panicHook PanicHook
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	err       error
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	mu     sync.Mutex
+	err    error
 }
 
 func NewGroup(ctx context.Context) *Group {
 	ctx, cancel := context.WithCancel(ctx)
 
-	panicHook, _ := panicHookFromContext(ctx)
-
 	return &Group{
-		ctx:       ctx,
-		cancel:    cancel,
-		panicHook: panicHook,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
@@ -42,9 +38,7 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 
 		defer func() {
 			if v := recover(); v != nil {
-				if hook := g.panicHook; hook != nil {
-					hook(v)
-				}
+				g.panicHook(v)
 				panic(v)
 			}
 		}()
@@ -64,6 +58,12 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 	}()
 }
 
+func (g *Group) panicHook(v interface{}) {
+	if hook, ok := g.ctx.Value(panicHookContextKey).(PanicHook); ok {
+		hook(v)
+	}
+}
+
 type contextKey struct{}
 
 var panicHookContextKey contextKey
@@ -72,11 +72,6 @@ type PanicHook func(interface{})
 
 func NewPanicHookContext(ctx context.Context, hook PanicHook) context.Context {
 	return context.WithValue(ctx, panicHookContextKey, hook)
-}
-
-func panicHookFromContext(ctx context.Context) (PanicHook, bool) {
-	hook, ok := ctx.Value(panicHookContextKey).(PanicHook)
-	return hook, ok
 }
 
 func WaitGroup(ctx context.Context, spawn func(g *Group)) error {
