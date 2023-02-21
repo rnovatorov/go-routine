@@ -2,6 +2,7 @@ package routine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -17,7 +18,7 @@ type Group struct {
 	cancel context.CancelCauseFunc
 	wg     sync.WaitGroup
 	mu     sync.Mutex
-	err    error
+	errs   []error
 }
 
 func NewGroup(ctx context.Context) *Group {
@@ -34,7 +35,7 @@ func (g *Group) Wait() error {
 
 	g.wg.Wait()
 
-	return g.err
+	return errors.Join(g.errs...)
 }
 
 func (g *Group) Go(name string, run func(context.Context) error) {
@@ -52,20 +53,12 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 		if err := run(g.ctx); err != nil {
 			err = fmt.Errorf("%s: %w", name, err)
 			g.cancel(err)
-			g.appendError(err)
+
+			g.mu.Lock()
+			g.errs = append(g.errs, err)
+			g.mu.Unlock()
 		}
 	}()
-}
-
-func (g *Group) appendError(err error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.err == nil {
-		g.err = err
-	} else {
-		g.err = fmt.Errorf("%w; %w", g.err, err)
-	}
 }
 
 func (g *Group) panicHook(v interface{}) {
