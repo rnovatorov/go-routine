@@ -43,10 +43,16 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 	go func() {
 		defer g.wg.Done()
 
-		if err := func() (retErr error) {
-			defer g.recover()
-			return run(g.ctx)
-		}(); err != nil {
+		defer func() {
+			if v := recover(); v != nil {
+				if hook := g.panicHook; hook != nil {
+					hook(v)
+				}
+				panic(v)
+			}
+		}()
+
+		if err := run(g.ctx); err != nil {
 			g.cancel()
 
 			g.mu.Lock()
@@ -59,15 +65,6 @@ func (g *Group) Go(name string, run func(context.Context) error) {
 			}
 		}
 	}()
-}
-
-func (g *Group) recover() {
-	if v := recover(); v != nil {
-		if hook := g.panicHook; hook != nil {
-			hook(v)
-		}
-		panic(v)
-	}
 }
 
 type contextKey struct{}
