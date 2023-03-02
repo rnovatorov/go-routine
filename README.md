@@ -15,3 +15,4 @@ Alternatives:
 - [go-together](https://github.com/tideland/go-together)
 - [nursery](https://github.com/arunsworld/nursery)
 - [oversight](https://github.com/cirello-io/oversight)
+- [parallel](https://github.com/ridge/parallel)
