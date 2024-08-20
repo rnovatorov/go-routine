@@ -1,124 +1,166 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/rnovatorov/go-routine"
 )
 
 type Server struct {
-	logger        *log.Logger
-	listenAddress string
+	*routine.Routine
+	logger    *log.Logger
+	listener  net.Listener
+	idCounter int
+	mu        sync.Mutex
+	sessions  map[int]*routine.Routine
 }
 
-func NewServer(logger *log.Logger, listenAddress string) *Server {
-	name := fmt.Sprintf("server[%s]", listenAddress)
-
-	return &Server{
-		logger:        log.New(logger.Writer(), name+" ", logger.Flags()),
-		listenAddress: listenAddress,
+func StartServer(
+	ctx context.Context, logger *log.Logger, listenAddress string,
+) (*Server, error) {
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
+	if err != nil {
+		return nil, err
 	}
+
+	s := &Server{
+		logger:   childLogger(logger, fmt.Sprintf("server[%s]", listenAddress)),
+		listener: listener,
+		sessions: make(map[int]*routine.Routine),
+	}
+	s.Routine = routine.Go(ctx, s.run)
+
+	return s, nil
 }
 
-func (s *Server) Run(ctx context.Context) error {
+func (s *Server) run(ctx context.Context) error {
 	s.logger.Print("started")
 	defer s.logger.Print("stopped")
 
-	return routine.WaitGroup(ctx, func(rg *routine.Group) {
-		listenerChan := s.listen(rg)
-		connChan := s.acceptConns(rg, listenerChan)
-		s.handleConns(rg, connChan)
-	})
-}
-
-func (s *Server) listen(rg *routine.Group) <-chan net.Listener {
-	listenerChan := make(chan net.Listener, 1)
-
-	rg.Go("listen", func(ctx context.Context) error {
-		var config net.ListenConfig
-
-		listener, err := config.Listen(ctx, "tcp", s.listenAddress)
-		if err != nil {
-			return err
+	listenerCloser := routine.Go(ctx, func(ctx context.Context) error {
+		<-ctx.Done()
+		if err := s.listener.Close(); err != nil {
+			s.logger.Printf("failed to close listener: %v", err)
 		}
-
-		rg.Go("close listener", func(ctx context.Context) error {
-			<-ctx.Done()
-			return listener.Close()
-		})
-
-		listenerChan <- listener
-
 		return nil
 	})
+	defer listenerCloser.Stop()
 
-	return listenerChan
-}
+	defer s.stopAllSessions()
 
-func (s *Server) acceptConns(rg *routine.Group, listenerChan <-chan net.Listener) <-chan net.Conn {
-	connChan := make(chan net.Conn)
-
-	rg.Go("accept conns", func(ctx context.Context) error {
-		var listener net.Listener
-
-		select {
-		case <-ctx.Done():
-			return nil
-		case listener = <-listenerChan:
-		}
-
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				if errors.Is(err, net.ErrClosed) {
-					return nil
-				}
-				return err
-			}
-
-			select {
-			case <-ctx.Done():
-				return conn.Close()
-			case connChan <- conn:
-			}
-		}
-	})
-
-	return connChan
-}
-
-func (s *Server) handleConns(rg *routine.Group, connChan <-chan net.Conn) {
-	rg.Go("handle conns", func(ctx context.Context) error {
-		for {
-			select {
-			case <-ctx.Done():
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
 				return nil
-			case conn := <-connChan:
-				s.startNewSession(rg, conn)
 			}
+			return fmt.Errorf("accept conn: %w", err)
 		}
+		s.startSession(ctx, conn)
+	}
+}
+
+func (s *Server) startSession(ctx context.Context, conn net.Conn) {
+	id := s.newSessionID()
+
+	logger := childLogger(s.logger, fmt.Sprintf(
+		"session[%d][%s]", id, conn.RemoteAddr()))
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.sessions[id] = routine.Go(ctx, func(ctx context.Context) error {
+		defer func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			delete(s.sessions, id)
+		}()
+
+		logger.Print("started")
+		defer logger.Print("stopped")
+
+		connCloser := routine.Go(ctx, func(ctx context.Context) error {
+			<-ctx.Done()
+			if err := conn.Close(); err != nil {
+				logger.Printf("failed to close conn: %v", err)
+			}
+			return nil
+		})
+		defer connCloser.Stop()
+
+		if err := s.echo(conn); err != nil {
+			logger.Printf("echo failed: %v", err)
+		}
+		return nil
 	})
 }
 
-func (s *Server) startNewSession(rg *routine.Group, conn net.Conn) {
-	name := fmt.Sprintf("session[%s->%s]", conn.LocalAddr(), conn.RemoteAddr())
-	session := NewSession(name, s.logger, conn)
-	stopped := make(chan struct{})
+func (s *Server) stopAllSessions() {
+	sessions := make(map[int]*routine.Routine)
+	s.mu.Lock()
+	for id, session := range s.sessions {
+		sessions[id] = session
+	}
+	s.mu.Unlock()
 
-	rg.Go(name, func(ctx context.Context) error {
-		defer close(stopped)
-		return session.Run(ctx)
-	})
-
-	rg.Go(name+" conn closer", func(ctx context.Context) error {
-		select {
-		case <-ctx.Done():
-		case <-stopped:
+	for id, session := range sessions {
+		if err := session.Stop(); err != nil {
+			s.logger.Printf("failed to stop session[%d]: %v", id, err)
 		}
-		return conn.Close()
-	})
+	}
+}
+
+func (s *Server) echo(conn net.Conn) error {
+	r := bufio.NewReader(conn)
+	w := bufio.NewWriter(conn)
+
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("read: %w", err)
+		}
+
+		switch m := string(line); m {
+		case "exit\n":
+			return nil
+		case "panic\n":
+			panic("oops")
+		case "error\n":
+			return errors.New("oops")
+		}
+
+		if _, err := w.Write(line); err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return fmt.Errorf("write: %w", err)
+		}
+
+		if err := w.Flush(); err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return fmt.Errorf("flush: %w", err)
+		}
+	}
+}
+
+func (s *Server) newSessionID() int {
+	s.idCounter++
+	return s.idCounter
+}
+
+func childLogger(parent *log.Logger, prefix string) *log.Logger {
+	prefix = fmt.Sprintf("%s%s ", parent.Prefix(), prefix)
+	return log.New(parent.Writer(), prefix, parent.Flags())
 }
