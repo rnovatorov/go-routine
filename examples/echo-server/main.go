@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -24,12 +25,25 @@ func run(ctx context.Context) error {
 
 	logger := log.New(os.Stderr, "", log.Ldate|log.Ltime|log.Lmsgprefix)
 
-	ctx = routine.NewPanicHookContext(ctx, func(v interface{}) {
-		logger.Println(":(")
-	})
+	ctx = routine.WithMiddleware(ctx, routine.NewRecoverMiddleware(func(v any) {
+		logger.Panicf("recover middleware: %v", v)
+	}))
 
 	listenAddress := os.Getenv("LISTEN_ADDRESS")
+	if listenAddress == "" {
+		return errListenAddressEmpty
+	}
 
-	server := NewServer(logger, listenAddress)
-	return server.Run(ctx)
+	server, err := StartServer(ctx, logger, listenAddress)
+	if err != nil {
+		return fmt.Errorf("start server: %w", err)
+	}
+
+	if err := server.Wait(); err != nil {
+		return fmt.Errorf("wait server: %w", err)
+	}
+
+	return nil
 }
+
+var errListenAddressEmpty = errors.New("listen address empty")
