@@ -2,8 +2,6 @@ package routine
 
 import "context"
 
-type Run func(context.Context) error
-
 type Routine struct {
 	err     error
 	ctx     context.Context
@@ -11,7 +9,7 @@ type Routine struct {
 	stopped chan struct{}
 }
 
-func Go(ctx context.Context, run Run) *Routine {
+func startRoutine(ctx context.Context, run Run) *Routine {
 	ctx, cancel := context.WithCancel(ctx)
 
 	r := &Routine{

@@ -8,18 +8,14 @@ import (
 	"io"
 	"log"
 	"net"
-	"sync"
 
 	"github.com/rnovatorov/go-routine"
 )
 
 type Server struct {
-	*routine.Routine
-	logger    *log.Logger
-	listener  net.Listener
-	idCounter int
-	mu        sync.Mutex
-	sessions  map[int]*routine.Routine
+	*routine.Group
+	logger   *log.Logger
+	listener net.Listener
 }
 
 func StartServer(
@@ -31,29 +27,26 @@ func StartServer(
 	}
 
 	s := &Server{
+		Group:    routine.StartGroup(ctx),
 		logger:   childLogger(logger, fmt.Sprintf("server[%s]", listenAddress)),
 		listener: listener,
-		sessions: make(map[int]*routine.Routine),
 	}
-	s.Routine = routine.Go(ctx, s.run)
 
-	return s, nil
-}
-
-func (s *Server) run(ctx context.Context) error {
-	s.logger.Print("started")
-	defer s.logger.Print("stopped")
-
-	listenerCloser := routine.Go(ctx, func(ctx context.Context) error {
+	s.Go(func(ctx context.Context) error {
 		<-ctx.Done()
 		if err := s.listener.Close(); err != nil {
 			s.logger.Printf("failed to close listener: %v", err)
 		}
 		return nil
 	})
-	defer listenerCloser.Stop()
+	s.Go(s.acceptConns)
 
-	defer s.stopAllSessions()
+	return s, nil
+}
+
+func (s *Server) acceptConns(ctx context.Context) error {
+	s.logger.Print("started accepting conns")
+	defer s.logger.Print("stopped accepting conns")
 
 	for {
 		conn, err := s.listener.Accept()
@@ -63,58 +56,33 @@ func (s *Server) run(ctx context.Context) error {
 			}
 			return fmt.Errorf("accept conn: %w", err)
 		}
-		s.startSession(ctx, conn)
+		s.startSession(conn)
 	}
 }
 
-func (s *Server) startSession(ctx context.Context, conn net.Conn) {
-	id := s.newSessionID()
+func (s *Server) startSession(conn net.Conn) {
+	logger := childLogger(s.logger, fmt.Sprintf("session[%s]", conn.RemoteAddr()))
 
-	logger := childLogger(s.logger, fmt.Sprintf(
-		"session[%d][%s]", id, conn.RemoteAddr()))
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.sessions[id] = routine.Go(ctx, func(ctx context.Context) error {
-		defer func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			delete(s.sessions, id)
-		}()
-
-		logger.Print("started")
-		defer logger.Print("stopped")
-
-		connCloser := routine.Go(ctx, func(ctx context.Context) error {
-			<-ctx.Done()
-			if err := conn.Close(); err != nil {
-				logger.Printf("failed to close conn: %v", err)
-			}
-			return nil
-		})
-		defer connCloser.Stop()
+	session := s.Go(func(ctx context.Context) error {
+		logger.Print("session started")
+		defer logger.Print("session stopped")
 
 		if err := s.echo(conn); err != nil {
-			logger.Printf("echo failed: %v", err)
+			return fmt.Errorf("echo: %w", err)
 		}
 		return nil
 	})
-}
 
-func (s *Server) stopAllSessions() {
-	sessions := make(map[int]*routine.Routine)
-	s.mu.Lock()
-	for id, session := range s.sessions {
-		sessions[id] = session
-	}
-	s.mu.Unlock()
-
-	for id, session := range sessions {
-		if err := session.Stop(); err != nil {
-			s.logger.Printf("failed to stop session[%d]: %v", id, err)
+	s.Go(func(ctx context.Context) error {
+		select {
+		case <-session.Stopped():
+		case <-ctx.Done():
 		}
-	}
+		if err := conn.Close(); err != nil {
+			logger.Printf("failed to close conn: %v", err)
+		}
+		return nil
+	})
 }
 
 func (s *Server) echo(conn net.Conn) error {
@@ -153,11 +121,6 @@ func (s *Server) echo(conn net.Conn) error {
 			return fmt.Errorf("flush: %w", err)
 		}
 	}
-}
-
-func (s *Server) newSessionID() int {
-	s.idCounter++
-	return s.idCounter
 }
 
 func childLogger(parent *log.Logger, prefix string) *log.Logger {
