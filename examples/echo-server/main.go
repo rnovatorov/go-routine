@@ -34,16 +34,7 @@ func run(ctx context.Context) error {
 		return errListenAddressEmpty
 	}
 
-	server, err := StartServer(ctx, logger, listenAddress)
-	if err != nil {
-		return fmt.Errorf("start server: %w", err)
-	}
-
-	if err := server.Wait(); err != nil {
-		return fmt.Errorf("wait server: %w", err)
-	}
-
-	return nil
+	return serve(ctx, logger, listenAddress)
 }
 
 var errListenAddressEmpty = errors.New("listen address empty")

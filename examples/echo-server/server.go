@@ -12,39 +12,57 @@ import (
 	"github.com/rnovatorov/go-routine"
 )
 
-type Server struct {
-	*routine.Group
-	logger   *log.Logger
-	listener net.Listener
+type server struct {
+	routines      *routine.Group
+	logger        *log.Logger
+	listenAddress string
+	listenerReady chan struct{}
+	listener      net.Listener
 }
 
-func StartServer(
+func serve(
 	ctx context.Context, logger *log.Logger, listenAddress string,
-) (*Server, error) {
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
+) error {
+	s := &server{
+		routines:      routine.NewGroup(ctx),
+		logger:        childLogger(logger, fmt.Sprintf("server[%s]", listenAddress)),
+		listenAddress: listenAddress,
+		listenerReady: make(chan struct{}),
+		listener:      nil,
+	}
+
+	s.routines.Go(s.listen)
+	s.routines.Go(s.acceptConns)
+
+	return s.routines.Wait()
+}
+
+func (s *server) listen(ctx context.Context) error {
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.listenAddress)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("listen: %w", err)
 	}
-
-	s := &Server{
-		Group:    routine.StartGroup(ctx),
-		logger:   childLogger(logger, fmt.Sprintf("server[%s]", listenAddress)),
-		listener: listener,
-	}
-
-	s.Go(func(ctx context.Context) error {
-		<-ctx.Done()
+	defer func() {
 		if err := s.listener.Close(); err != nil {
 			s.logger.Printf("failed to close listener: %v", err)
 		}
-		return nil
-	})
-	s.Go(s.acceptConns)
+	}()
 
-	return s, nil
+	s.listener = listener
+	close(s.listenerReady)
+
+	<-ctx.Done()
+
+	return nil
 }
 
-func (s *Server) acceptConns(ctx context.Context) error {
+func (s *server) acceptConns(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-s.listenerReady:
+	}
+
 	s.logger.Print("started accepting conns")
 	defer s.logger.Print("stopped accepting conns")
 
@@ -60,10 +78,10 @@ func (s *Server) acceptConns(ctx context.Context) error {
 	}
 }
 
-func (s *Server) startSession(conn net.Conn) {
+func (s *server) startSession(conn net.Conn) {
 	logger := childLogger(s.logger, fmt.Sprintf("session[%s]", conn.RemoteAddr()))
 
-	session := s.Go(func(ctx context.Context) error {
+	session := s.routines.Go(func(ctx context.Context) error {
 		logger.Print("session started")
 		defer logger.Print("session stopped")
 
@@ -73,7 +91,7 @@ func (s *Server) startSession(conn net.Conn) {
 		return nil
 	})
 
-	s.Go(func(ctx context.Context) error {
+	s.routines.Go(func(ctx context.Context) error {
 		select {
 		case <-session.Stopped():
 		case <-ctx.Done():
@@ -85,7 +103,7 @@ func (s *Server) startSession(conn net.Conn) {
 	})
 }
 
-func (s *Server) echo(conn net.Conn) error {
+func (s *server) echo(conn net.Conn) error {
 	r := bufio.NewReader(conn)
 	w := bufio.NewWriter(conn)
 

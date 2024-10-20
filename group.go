@@ -7,16 +7,20 @@ import (
 )
 
 type Group struct {
-	*Routine
-	wg   sync.WaitGroup
-	mu   sync.Mutex
-	errs []error
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	mu     sync.Mutex
+	errs   []error
 }
 
-func StartGroup(ctx context.Context) *Group {
-	g := &Group{}
-	g.Routine = startRoutine(ctx, g.run)
-	return g
+func NewGroup(ctx context.Context) *Group {
+	ctx, cancel := context.WithCancel(ctx)
+
+	return &Group{
+		ctx:    ctx,
+		cancel: cancel,
+	}
 }
 
 func (g *Group) Go(run Run) *Routine {
@@ -25,7 +29,7 @@ func (g *Group) Go(run Run) *Routine {
 		defer g.wg.Done()
 
 		if err := run(ctx); err != nil {
-			g.Cancel()
+			g.cancel()
 
 			g.mu.Lock()
 			g.errs = append(g.errs, err)
@@ -36,9 +40,8 @@ func (g *Group) Go(run Run) *Routine {
 	})
 }
 
-func (g *Group) run(ctx context.Context) error {
-	<-ctx.Done()
-
+func (g *Group) Wait() error {
+	defer g.cancel()
 	g.wg.Wait()
 
 	g.mu.Lock()
