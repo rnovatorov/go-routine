@@ -25,7 +25,7 @@ func MiddlewareFromContext(ctx context.Context) (Middleware, bool) {
 }
 
 func NewRecoverMiddleware(recoverer func(any)) Middleware {
-	return Middleware(func(run Run) Run {
+	return func(run Run) Run {
 		return func(ctx context.Context) (ret error) {
 			defer func() {
 				if v := recover(); v != nil {
@@ -35,7 +35,7 @@ func NewRecoverMiddleware(recoverer func(any)) Middleware {
 			}()
 			return run(ctx)
 		}
-	})
+	}
 }
 
 type PanicRecoveredError struct {
