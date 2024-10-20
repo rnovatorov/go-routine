@@ -40,6 +40,11 @@ func (g *Group) Go(run Run) *Routine {
 	})
 }
 
+func (g *Group) Stop() error {
+	g.cancel()
+	return g.Wait()
+}
+
 func (g *Group) Wait() error {
 	defer g.cancel()
 	g.wg.Wait()
