@@ -34,6 +34,8 @@ func (g *Group) Go(run Run) *Routine {
 			g.mu.Lock()
 			g.errs = append(g.errs, err)
 			g.mu.Unlock()
+
+			return err
 		}
 
 		return nil
