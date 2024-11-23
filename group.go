@@ -25,7 +25,7 @@ func NewGroup(ctx context.Context) *Group {
 
 func (g *Group) Go(run Run) *Routine {
 	g.wg.Add(1)
-	return startRoutine(g.ctx, func(ctx context.Context) error {
+	return Go(g.ctx, func(ctx context.Context) error {
 		defer g.wg.Done()
 
 		if err := run(ctx); err != nil {

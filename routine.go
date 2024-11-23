@@ -9,7 +9,7 @@ type Routine struct {
 	stopped chan struct{}
 }
 
-func startRoutine(ctx context.Context, run Run) *Routine {
+func Go(ctx context.Context, run Run) *Routine {
 	ctx, cancel := context.WithCancel(ctx)
 
 	r := &Routine{
