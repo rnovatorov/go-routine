@@ -39,14 +39,14 @@ func (r *Routine) Stopped() <-chan struct{} {
 
 func (r *Routine) Stop() error {
 	r.cancel()
-	return r.Wait()
+	return r.WaitStopped()
 }
 
 func (r *Routine) Cancel() {
 	r.cancel()
 }
 
-func (r *Routine) Wait() error {
+func (r *Routine) WaitStopped() error {
 	<-r.stopped
 	return r.err
 }
