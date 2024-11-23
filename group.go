@@ -23,6 +23,10 @@ func NewGroup(ctx context.Context) *Group {
 	}
 }
 
+func (g *Group) Context() context.Context {
+	return g.ctx
+}
+
 func (g *Group) Go(run Run) *Routine {
 	g.wg.Add(1)
 	return startRoutine(g.ctx, func(ctx context.Context) error {
