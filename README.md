@@ -16,3 +16,4 @@ Alternatives:
 - [nursery](https://github.com/arunsworld/nursery)
 - [oversight](https://github.com/cirello-io/oversight)
 - [parallel](https://github.com/ridge/parallel)
+- [oklog/run](https://github.com/oklog/run)
